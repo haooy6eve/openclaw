@@ -203,3 +203,107 @@ OpenClaw 可以先理解成三层：
 13. `src/plugins/runtime.ts`
 
 如果你准备做第一个 PR，建议从“补一段路由测试或新增一个小 CLI 子命令”开始，风险低、反馈快。
+
+---
+
+## 8) 引用代码逐文件拆解（每一步做什么）
+
+> 这部分按“从入口到执行”的顺序，把上面引用的关键代码文件逐个拆开，方便你对照源码逐行读。
+
+### 8.1 `src/index.ts`（CLI 启动入口）
+
+1. **加载环境和运行前置**：先做 `.env` 加载、环境归一化、PATH 修正、日志捕获和运行时版本校验。
+2. **构建命令程序**：调用 `buildProgram()` 获取 commander 程序对象。
+3. **判断是否主模块运行**：如果是被直接执行，就注册全局异常处理并 `parseAsync(process.argv)`。
+4. **导出复用函数**：把若干工具函数 re-export，供其他模块或测试复用。
+
+### 8.2 `src/cli/program/build-program.ts`（CLI 装配总控）
+
+1. 创建 `Command` 实例。
+2. 创建程序上下文（版本信息、通用参数上下文）。
+3. 配置帮助文案和 pre-action hooks。
+4. 调用命令注册器注册所有主命令和子命令。
+5. 返回完整 program。
+
+### 8.3 `src/cli/program/command-registry.ts`（命令注册与快速路由）
+
+1. 定义 `CommandRegistration` 数据结构，把“注册行为”和“可选路由行为”绑定。
+2. 声明快速路由（如 health/status/sessions/memory），减少不必要的全量加载。
+3. 在 `commandRegistry` 列表里集中维护各模块命令的注册入口。
+4. `registerProgramCommands` 遍历 registry 完成装配。
+5. `findRoutedCommand` 负责在 argv path 上查找命中的路由处理器。
+
+### 8.4 `src/cli/program/register.subclis.ts`（子 CLI 懒加载中心）
+
+1. 定义 `entries`：每个子 CLI 的名称、描述、注册函数。
+2. 每个 `register` 都通过动态 `import()` 延迟加载真实模块。
+3. 对 pairing/plugins 等依赖插件注册表的命令，先初始化 plugin CLI 再注册命令。
+4. 提供 `registerSubCliByName` 支持按需注册单个子命令。
+5. 根据环境变量决定是否 eager 注册，兼顾启动速度与调试可见性。
+
+### 8.5 `src/gateway/server.impl.ts`（Gateway 主装配实现）
+
+1. **启动前配置处理**：读取配置快照、执行 legacy 迁移、校验非法配置。
+2. **插件与渠道初始化**：加载插件、聚合 channel methods、创建各子系统 logger。
+3. **运行时参数解析**：绑定地址、鉴权、control UI、tailscale、http endpoint 开关。
+4. **服务组件接线**：WS/HTTP server、canvas host、hooks、cron、discovery、health、维护定时器。
+5. **生命周期管理**：处理关闭逻辑、重载逻辑、会话与节点状态广播。
+
+### 8.6 `src/gateway/server-methods-list.ts`（Gateway 方法清单）
+
+1. 统一维护“可调用 Gateway 方法”的集合。
+2. 将 core methods 与扩展 methods 合并成最终列表。
+3. 给协议暴露层/日志层/分发层提供一致的方法名来源。
+
+### 8.7 `src/gateway/protocol/schema.ts`（协议 Schema 边界）
+
+1. 使用 TypeBox 定义 request/response/event 数据结构。
+2. 约束连接握手、方法参数、返回负载的结构。
+3. 为 runtime 校验和下游代码生成（如 schema/swift 模型）提供源定义。
+
+### 8.8 `src/routing/resolve-route.ts`（路由决策）
+
+1. 对 channel/account/peer/guild/team 做标准化。
+2. 从配置中筛选可匹配 binding。
+3. 按固定优先级逐层匹配（peer → parentPeer → guild/team → account/channel）。
+4. 选择 agent 后生成 `sessionKey` 与 `mainSessionKey`。
+5. 返回 `matchedBy` 便于调试与可观测。
+
+### 8.9 `src/routing/session-key.ts`（会话键规则）
+
+1. 统一约定主会话键和 peer 会话键格式。
+2. 根据 dm scope/account/channel/peer 组合生成可复现键。
+3. 提供 agent id 归一化与 key 构造辅助，确保跨渠道一致。
+
+### 8.10 `src/commands/agent.ts`（Agent 命令执行主线）
+
+1. 做输入校验（message、session 目标、agent id）。
+2. 解析会话（session id/key/store）并加载已有状态。
+3. 解析模型、thinking、verbose、timeout 等执行参数。
+4. 处理技能快照与会话回写（必要时写回 session store）。
+5. 执行 agent（含 fallback）并按策略投递结果。
+
+### 8.11 `src/channels/plugins/index.ts`（渠道插件聚合）
+
+1. 从 active plugin registry 读取所有 channel 插件。
+2. 对重复 channel id 去重。
+3. 按内置顺序 + 插件自定义顺序排序。
+4. 对外暴露 `listChannelPlugins/getChannelPlugin/normalizeChannelId` 等接口。
+
+### 8.12 `src/plugins/runtime.ts`（插件运行时单例状态）
+
+1. 初始化全局 registry state（挂在 `globalThis`）。
+2. 提供 set/get/require 三类访问器。
+3. 允许在不同加载路径中共享同一份运行时插件注册表。
+
+### 8.13 `src/plugins/registry.ts`（插件注册表结构定义）
+
+1. 定义插件注册表的数据模型（plugins/tools/hooks/channels/providers 等）。
+2. 规定插件加载结果如何被聚合。
+3. 为 runtime 和 loader 提供统一类型契约。
+
+### 8.14 `docs/concepts/architecture.md`（架构文档基线）
+
+1. 提供 Gateway 架构总览和连接生命周期。
+2. 说明客户端、节点、WebChat 等角色边界。
+3. 给出握手协议、远程访问和系统不变量，是“代码阅读前的语义底座”。
