@@ -814,7 +814,8 @@
                 "pages": [
                   "start/openclaw",
                   "start/project-initialization-core-flow",
-                  "start/project-structure-overview"
+                  "start/project-structure-overview",
+                  "start/business-logic-code-walkthrough"
                 ]
               }
             ]
