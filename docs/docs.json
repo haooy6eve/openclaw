@@ -811,7 +811,11 @@
               },
               {
                 "group": "Guides",
-                "pages": ["start/openclaw"]
+                "pages": [
+                  "start/openclaw",
+                  "start/project-initialization-core-flow",
+                  "start/project-structure-overview"
+                ]
               }
             ]
           },
